@@ -29,7 +29,7 @@ int main(){
         cout << multiplier << " nota(s) de R$: "<<  (float) notes[i]  <<endl;
         input = remaining;
     }
-    cout << input <<endl;
+    // cout << input <<endl;
     cout << "MOEDAS" << endl;
 
     for (int i = 0; i < 6; i++){
