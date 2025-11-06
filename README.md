@@ -131,22 +131,27 @@ The runner automatically removes:
 
 ## Tips
 
-1. **For competitive programming**: Use default quiet mode for quick testing
+1. **For competitive programming**: Use with input file to avoid timeout
    ```bash
-   python3 cpp_runner.py solution.cpp
+   ./run solution.cpp -i input.txt
    ```
 
 2. **For debugging**: Enable logs to see detailed compilation and execution info
    ```bash
-   python3 cpp_runner.py solution.cpp -l
+   ./run solution.cpp -i input.txt -l
    ```
 
 3. **For development**: Use watch mode to auto-compile as you code
    ```bash
-   python3 cpp_runner.py main.cpp -w
+   ./run main.cpp -w
    ```
 
-4. **For macOS without bits/stdc++.h**: Use standard headers like `<iostream>` instead
+4. **For testing with input**: Watch mode + input file for rapid testing
+   ```bash
+   ./run solution.cpp -w -i input.txt
+   ```
+
+5. **For macOS without bits/stdc++.h**: Use standard headers like `<iostream>` instead
 
 ## Troubleshooting
 
