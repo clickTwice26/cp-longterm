@@ -18,7 +18,7 @@ A comprehensive Python-based C++ runner for macOS that automatically compiles, r
 ### Default Mode (Quiet - No Logs)
 Just compile and run - shows only program output and execution time:
 ```bash
-python3 cpp_runner.py test.cpp
+./run test.cpp
 ```
 
 **Output:**
@@ -28,10 +28,18 @@ Hello World
 ⏱  Execution time: 0.147s
 ```
 
+### With Input File (for Competitive Programming)
+Provide input from a file instead of typing manually:
+```bash
+./run solution.cpp -i input.txt
+```
+
+This prevents timeout issues when programs expect input.
+
 ### With Detailed Logs
 Enable comprehensive logging to `logs/` directory:
 ```bash
-python3 cpp_runner.py test.cpp -l
+./run test.cpp -l
 ```
 
 Shows compilation steps, execution details, and creates timestamped log files.
@@ -39,22 +47,28 @@ Shows compilation steps, execution details, and creates timestamped log files.
 ### Watch Mode
 Auto-recompile and run when file changes:
 ```bash
-python3 cpp_runner.py test.cpp -w
+./run test.cpp -w
 ```
 
 Add `-l` for logs in watch mode:
 ```bash
-python3 cpp_runner.py test.cpp -w -l
+./run test.cpp -w -l
+```
+
+With input file:
+```bash
+./run solution.cpp -w -i input.txt
 ```
 
 ## Usage
 
 ```bash
-python3 cpp_runner.py <source_file> [options]
+./run <source_file> [options]
 ```
 
 ### Options
 
+- `-i, --input <file>` - Input file to pipe to the program (for competitive programming)
 - `-w, --watch` - Watch mode: auto-recompile on file changes
 - `-l, --logs` - Enable detailed logging to logs/ directory
 - `-c, --compiler` - Compiler to use (default: g++)
@@ -65,25 +79,31 @@ python3 cpp_runner.py <source_file> [options]
 
 ```bash
 # Quiet run (default)
-python3 cpp_runner.py test.cpp
+./run test.cpp
+
+# With input file
+./run solution.cpp -i input.txt
 
 # With logs
-python3 cpp_runner.py test.cpp -l
+./run test.cpp -l
 
 # Watch mode
-python3 cpp_runner.py test.cpp -w
+./run test.cpp -w
+
+# Watch mode with input file
+./run solution.cpp -w -i input.txt
 
 # Watch mode with logs
-python3 cpp_runner.py test.cpp -w -l
+./run test.cpp -w -l
 
 # Use clang++ compiler
-python3 cpp_runner.py test.cpp -c clang++
+./run test.cpp -c clang++
 
 # Use C++20 standard
-python3 cpp_runner.py test.cpp -s c++20
+./run test.cpp -s c++20
 
 # Custom optimization
-python3 cpp_runner.py test.cpp -o O3
+./run test.cpp -o O3
 ```
 
 ## Log Files

@@ -26,13 +26,14 @@ class Colors:
     NC = '\033[0m'  # No Color
 
 class CppRunner:
-    def __init__(self, source_file, watch=False, compiler='g++', std='c++17', optimization='O2', enable_logs=False):
+    def __init__(self, source_file, watch=False, compiler='g++', std='c++17', optimization='O2', enable_logs=False, input_file=None):
         self.source_file = Path(source_file)
         self.watch = watch
         self.compiler = compiler
         self.std = std
         self.optimization = optimization
         self.enable_logs = enable_logs
+        self.input_file = Path(input_file) if input_file else None
         
         # Setup directories
         self.workspace_dir = Path.cwd()
@@ -242,8 +243,21 @@ class CppRunner:
         try:
             start_time = time.time()
             
+            # Prepare stdin
+            stdin_input = None
+            if self.input_file:
+                if self.input_file.exists():
+                    with open(self.input_file, 'r') as f:
+                        stdin_input = f.read()
+                    if self.enable_logs:
+                        self.print_colored(f"Using input from: {self.input_file}", Colors.YELLOW)
+                else:
+                    self.print_colored(f"✗ Input file {self.input_file} not found", Colors.RED)
+                    return False
+            
             result = subprocess.run(
                 [f'./{self.executable}'],
+                input=stdin_input,
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -256,6 +270,9 @@ class CppRunner:
             runtime_output = f"Executable: ./{self.executable}\n"
             runtime_output += f"Execution Time: {execution_time:.3f} seconds\n"
             runtime_output += f"Return Code: {result.returncode}\n\n"
+            
+            if self.input_file:
+                runtime_output += f"INPUT (from {self.input_file}):\n{stdin_input}\n\n"
             
             if result.stdout:
                 runtime_output += f"STDOUT:\n{result.stdout}\n\n"
@@ -383,6 +400,7 @@ def main():
         epilog="""
 Examples:
   %(prog)s test.cpp              # Compile and run once (no logs)
+  %(prog)s test.cpp -i input.txt # Run with input from file
   %(prog)s test.cpp -l           # Compile and run with detailed logs
   %(prog)s test.cpp -w           # Watch mode (auto-recompile on changes)
   %(prog)s test.cpp -w -l        # Watch mode with logs
@@ -392,6 +410,7 @@ Examples:
     )
     
     parser.add_argument('source_file', help='C++ source file to compile and run')
+    parser.add_argument('-i', '--input', dest='input_file', help='Input file to pipe to the program')
     parser.add_argument('-w', '--watch', action='store_true', help='Watch mode: auto-recompile on file changes')
     parser.add_argument('-l', '--logs', action='store_true', help='Enable detailed logging to logs/ directory')
     parser.add_argument('-c', '--compiler', default='g++', help='Compiler to use (default: g++)')
@@ -407,7 +426,8 @@ Examples:
         compiler=args.compiler,
         std=args.std,
         optimization=args.optimization,
-        enable_logs=args.logs
+        enable_logs=args.logs,
+        input_file=args.input_file
     )
 
     # Run
