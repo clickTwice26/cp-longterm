@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""
+Smart C++ Runner for macOS
+Watches for file changes, compiles, runs, and logs everything
+"""
+
+import os
+import sys
+import subprocess
+import time
+import logging
+from datetime import datetime
+from pathlib import Path
+import argparse
+import hashlib
+
+# ANSI color codes
+class Colors:
+    RED = '\033[0;31m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    BLUE = '\033[0;34m'
+    MAGENTA = '\033[0;35m'
+    CYAN = '\033[0;36m'
+    BOLD = '\033[1m'
+    NC = '\033[0m'  # No Color
+
+class CppRunner:
+    def __init__(self, source_file, watch=False, compiler='g++', std='c++17', optimization='O2', enable_logs=False):
+        self.source_file = Path(source_file)
+        self.watch = watch
+        self.compiler = compiler
+        self.std = std
+        self.optimization = optimization
+        self.enable_logs = enable_logs
+        
+        # Setup directories
+        self.workspace_dir = Path.cwd()
+        
+        if self.enable_logs:
+            self.logs_dir = self.workspace_dir / 'logs'
+            self.logs_dir.mkdir(exist_ok=True)
+        
+        # Setup logging
+        self.setup_logging()
+        
+        # Track file hash for changes
+        self.last_hash = None
+        
+        # Executable name
+        self.executable = self.source_file.stem + '.out'
+        
+        if self.enable_logs:
+            self.logger.info(f"Initialized C++ Runner for {self.source_file}")
+        
+    def setup_logging(self):
+        """Setup comprehensive logging system"""
+        # Setup main logger
+        self.logger = logging.getLogger('CppRunner')
+        self.logger.setLevel(logging.DEBUG if self.enable_logs else logging.INFO)
+        
+        # Initialize log file paths as None
+        self.main_log = None
+        self.compile_log = None
+        self.runtime_log = None
+        self.error_log = None
+        self.latest_log = None
+        
+        if self.enable_logs:
+            # Create timestamp for this session
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # Log files
+            self.main_log = self.logs_dir / f'runner_{timestamp}.log'
+            self.compile_log = self.logs_dir / f'compile_{timestamp}.log'
+            self.runtime_log = self.logs_dir / f'runtime_{timestamp}.log'
+            self.error_log = self.logs_dir / f'errors_{timestamp}.log'
+            
+            # Also create a latest.log symlink
+            self.latest_log = self.logs_dir / 'latest.log'
+            
+            # File handler for main log
+            file_handler = logging.FileHandler(self.main_log)
+            file_handler.setLevel(logging.DEBUG)
+            
+            # Formatter
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+            
+            # Create/update latest.log symlink
+            if self.latest_log.exists() or self.latest_log.is_symlink():
+                self.latest_log.unlink()
+            self.latest_log.symlink_to(self.main_log.name)
+            
+            self.logger.info("=" * 80)
+            self.logger.info("C++ Smart Runner Started")
+            self.logger.info(f"Logs directory: {self.logs_dir}")
+            self.logger.info("=" * 80)
+        else:
+            # Disable logging to prevent any log output
+            self.logger.addHandler(logging.NullHandler())
+            self.logger.propagate = False
+    
+    def get_file_hash(self):
+        """Get hash of source file to detect changes"""
+        try:
+            with open(self.source_file, 'rb') as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception as e:
+            self.logger.error(f"Failed to read source file: {e}")
+            return None
+    
+    def print_colored(self, message, color):
+        """Print colored message to console"""
+        print(f"{color}{message}{Colors.NC}")
+    
+    def log_to_file(self, filepath, content):
+        """Write content to a specific log file"""
+        if not self.enable_logs:
+            return
+        
+        try:
+            with open(filepath, 'a') as f:
+                f.write(f"\n{'=' * 80}\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"{'=' * 80}\n")
+                f.write(content)
+                f.write(f"\n{'=' * 80}\n\n")
+        except Exception as e:
+            self.logger.error(f"Failed to write to {filepath}: {e}")
+    
+    def cleanup_artifacts(self):
+        """Clean up build artifacts"""
+        artifacts = ['*.o', 'a.out', '*.out']
+        cleaned = []
+        
+        for pattern in artifacts:
+            for file in self.workspace_dir.glob(pattern):
+                try:
+                    file.unlink()
+                    cleaned.append(file.name)
+                    self.logger.debug(f"Removed: {file.name}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to remove {file.name}: {e}")
+        
+        if cleaned:
+            self.logger.info(f"Cleaned up: {', '.join(cleaned)}")
+            return True
+        return False
+    
+    def compile(self):
+        """Compile the C++ source file"""
+        if self.enable_logs:
+            self.print_colored("\n" + "=" * 80, Colors.BLUE)
+            self.print_colored(f"[{datetime.now().strftime('%H:%M:%S')}] Compiling {self.source_file}...", Colors.YELLOW)
+        
+        self.logger.info(f"Starting compilation of {self.source_file}")
+        
+        # Build compile command
+        cmd = [
+            self.compiler,
+            f'-std={self.std}',
+            f'-{self.optimization}',
+            '-Wall',
+            '-Wextra',
+            str(self.source_file),
+            '-o',
+            self.executable
+        ]
+        
+        self.logger.debug(f"Compile command: {' '.join(cmd)}")
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Log compilation output
+            compile_output = f"Command: {' '.join(cmd)}\n\n"
+            compile_output += f"Return Code: {result.returncode}\n\n"
+            
+            if result.stdout:
+                compile_output += f"STDOUT:\n{result.stdout}\n\n"
+            if result.stderr:
+                compile_output += f"STDERR:\n{result.stderr}\n"
+            
+            self.log_to_file(self.compile_log, compile_output)
+            
+            if result.returncode == 0:
+                if self.enable_logs:
+                    self.print_colored("✓ Compilation successful", Colors.GREEN)
+                self.logger.info("Compilation successful")
+                return True
+            else:
+                self.print_colored("✗ Compilation failed", Colors.RED)
+                self.logger.error(f"Compilation failed with code {result.returncode}")
+                
+                if result.stderr:
+                    self.print_colored("\nCompilation errors:", Colors.RED)
+                    print(result.stderr)
+                    self.log_to_file(self.error_log, f"COMPILATION ERROR:\n{result.stderr}")
+                
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self.print_colored("✗ Compilation timed out", Colors.RED)
+            self.logger.error("Compilation timed out after 30 seconds")
+            self.log_to_file(self.error_log, "COMPILATION TIMEOUT: Process exceeded 30 seconds")
+            return False
+        except Exception as e:
+            self.print_colored(f"✗ Compilation error: {e}", Colors.RED)
+            self.logger.error(f"Compilation exception: {e}")
+            self.log_to_file(self.error_log, f"COMPILATION EXCEPTION:\n{str(e)}")
+            return False
+    
+    def run(self):
+        """Run the compiled executable"""
+        if self.enable_logs:
+            self.print_colored("=" * 80, Colors.BLUE)
+            self.print_colored(f"[{datetime.now().strftime('%H:%M:%S')}] Running program...", Colors.YELLOW)
+            self.print_colored("=" * 80, Colors.BLUE)
+        else:
+            # In quiet mode, just show simple notice
+            self.print_colored(f"\n▶ Running...", Colors.CYAN)
+        
+        self.logger.info("Starting program execution")
+        
+        exe_path = self.workspace_dir / self.executable
+        
+        if not exe_path.exists():
+            self.print_colored(f"✗ Executable {self.executable} not found", Colors.RED)
+            self.logger.error(f"Executable {self.executable} not found")
+            return False
+        
+        try:
+            start_time = time.time()
+            
+            result = subprocess.run(
+                [f'./{self.executable}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            end_time = time.time()
+            execution_time = end_time - start_time
+            
+            # Log runtime output
+            runtime_output = f"Executable: ./{self.executable}\n"
+            runtime_output += f"Execution Time: {execution_time:.3f} seconds\n"
+            runtime_output += f"Return Code: {result.returncode}\n\n"
+            
+            if result.stdout:
+                runtime_output += f"STDOUT:\n{result.stdout}\n\n"
+                print(result.stdout, end='')
+            
+            if result.stderr:
+                runtime_output += f"STDERR:\n{result.stderr}\n"
+                self.print_colored(f"\nSTDERR:\n{result.stderr}", Colors.RED)
+            
+            self.log_to_file(self.runtime_log, runtime_output)
+            
+            if self.enable_logs:
+                self.print_colored("=" * 80, Colors.BLUE)
+            
+            # Always show execution time
+            self.print_colored(f"⏱  Execution time: {execution_time:.3f}s", Colors.CYAN)
+            
+            if self.enable_logs:
+                if result.returncode == 0:
+                    self.print_colored(f"✓ Program exited successfully (exit code: {result.returncode})", Colors.GREEN)
+                else:
+                    self.print_colored(f"✗ Program exited with code: {result.returncode}", Colors.RED)
+            
+            self.logger.info(f"Program executed successfully in {execution_time:.3f}s")
+            
+            if result.returncode != 0:
+                self.logger.warning(f"Program exited with code {result.returncode}")
+                self.log_to_file(self.error_log, f"RUNTIME ERROR (exit code {result.returncode}):\n{runtime_output}")
+            
+            return True
+            
+        except subprocess.TimeoutExpired:
+            self.print_colored("✗ Program timed out (exceeded 10 seconds)", Colors.RED)
+            self.logger.error("Program execution timed out")
+            self.log_to_file(self.error_log, "RUNTIME TIMEOUT: Program exceeded 10 seconds")
+            return False
+        except Exception as e:
+            self.print_colored(f"✗ Runtime error: {e}", Colors.RED)
+            self.logger.error(f"Runtime exception: {e}")
+            self.log_to_file(self.error_log, f"RUNTIME EXCEPTION:\n{str(e)}")
+            return False
+    
+    def compile_and_run(self):
+        """Compile and run the program, then cleanup"""
+        if not self.source_file.exists():
+            self.print_colored(f"✗ Source file {self.source_file} not found", Colors.RED)
+            self.logger.error(f"Source file {self.source_file} not found")
+            return False
+        
+        # Compile
+        if not self.compile():
+            return False
+        
+        # Run
+        self.run()
+        
+        # Cleanup
+        if self.enable_logs:
+            self.print_colored("=" * 80, Colors.BLUE)
+            self.print_colored("✓ Cleaned up build artifacts", Colors.GREEN)
+            self.print_colored("=" * 80, Colors.BLUE)
+        
+        self.cleanup_artifacts()
+        
+        if not self.enable_logs:
+            print()  # Just a newline for spacing
+        else:
+            print()
+        
+        return True
+    
+    def watch_mode(self):
+        """Watch for file changes and auto-compile"""
+        self.print_colored(f"\n{Colors.BOLD}Smart C++ Runner - Watch Mode{Colors.NC}", Colors.GREEN)
+        self.print_colored(f"Watching: {self.source_file}", Colors.BLUE)
+        self.print_colored("Press Ctrl+C to stop\n", Colors.YELLOW)
+        self.logger.info("Entering watch mode")
+        
+        # Initial compile and run
+        self.compile_and_run()
+        self.last_hash = self.get_file_hash()
+        
+        try:
+            while True:
+                time.sleep(1)  # Check every second
+                
+                current_hash = self.get_file_hash()
+                
+                if current_hash and current_hash != self.last_hash:
+                    self.print_colored(f"[{datetime.now().strftime('%H:%M:%S')}] File changed detected, recompiling...", Colors.MAGENTA)
+                    self.logger.info("File change detected")
+                    
+                    self.compile_and_run()
+                    self.last_hash = current_hash
+                    
+        except KeyboardInterrupt:
+            self.print_colored("\n\n✓ Watch mode stopped", Colors.YELLOW)
+            self.logger.info("Watch mode stopped by user")
+    
+    def run_once(self):
+        """Run compilation and execution once"""
+        if self.enable_logs:
+            self.print_colored(f"\n{Colors.BOLD}Smart C++ Runner{Colors.NC}", Colors.GREEN)
+        
+        self.compile_and_run()
+        self.print_summary()
+    
+    def print_summary(self):
+        """Print summary of log files"""
+        if not self.enable_logs:
+            return
+        
+        self.print_colored("\n📁 Log Files:", Colors.CYAN)
+        print(f"  Main log:    {self.main_log}")
+        print(f"  Compile log: {self.compile_log}")
+        print(f"  Runtime log: {self.runtime_log}")
+        print(f"  Error log:   {self.error_log}")
+        print(f"  Latest log:  {self.latest_log}")
+        print()
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Smart C++ Runner with comprehensive logging',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s test.cpp              # Compile and run once (no logs)
+  %(prog)s test.cpp -l           # Compile and run with detailed logs
+  %(prog)s test.cpp -w           # Watch mode (auto-recompile on changes)
+  %(prog)s test.cpp -w -l        # Watch mode with logs
+  %(prog)s test.cpp -c clang++   # Use clang++ compiler
+  %(prog)s test.cpp -s c++20     # Use C++20 standard
+        """
+    )
+    
+    parser.add_argument('source_file', help='C++ source file to compile and run')
+    parser.add_argument('-w', '--watch', action='store_true', help='Watch mode: auto-recompile on file changes')
+    parser.add_argument('-l', '--logs', action='store_true', help='Enable detailed logging to logs/ directory')
+    parser.add_argument('-c', '--compiler', default='g++', help='Compiler to use (default: g++)')
+    parser.add_argument('-s', '--std', default='c++17', help='C++ standard (default: c++17)')
+    parser.add_argument('-o', '--optimization', default='O2', help='Optimization level (default: O2)')
+    
+    args = parser.parse_args()
+    
+    # Create runner
+    runner = CppRunner(
+        source_file=args.source_file,
+        watch=args.watch,
+        compiler=args.compiler,
+        std=args.std,
+        optimization=args.optimization,
+        enable_logs=args.logs
+    )
+
+    # Run
+    try:
+        if args.watch:
+            runner.watch_mode()
+        else:
+            runner.run_once()
+    except Exception as e:
+        runner.logger.error(f"Fatal error: {e}")
+        runner.print_colored(f"✗ Fatal error: {e}", Colors.RED)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
